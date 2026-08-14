@@ -1,60 +1,72 @@
 # Combat System
 
-Covers: melee hit detection & weapon tracking → parry/block → enemy AI state machine & hit reactions → throwables/blow dart → shared damage pipeline → enemy spawn/encounter activation.
+Covers: melee hit detection → parry/block → enemy AI state machine & hit reactions → throwables/blow dart → shared damage pipeline → enemy spawn/encounter activation.
+
+> **Implementation status summary:** melee hit detection, the shared damage pipeline, the enemy state machine (partial), and a simplified `EncounterManager` are **implemented** in `Scripts/Combat`. Parry/block, ranged weapons (rock/dart), and enemy-attacks-player are **not yet implemented**. Details inline below.
 
 ---
 
-## 1. Melee hit detection
+## 1. Melee hit detection — ✅ Implemented (`SwordWeapon.cs`)
 
 Naive trigger-collider-on-blade detection fails at VR swing speeds:
 - **Tunneling** — fast swings can pass fully through a thin hitbox between physics steps without ever overlapping.
 - **False/spam hits** — the blade resting near an enemy can register as a hit even when not actively swinging.
 
-### Recommended approach: velocity gating + sweep testing
+### Approach used: velocity gating + sweep testing
 
-1. **Track blade tip velocity every `FixedUpdate`** (tip velocity, not hilt/grip velocity — the tip moves much faster on a wrist-driven swing).
-   ```csharp
-   Vector3 currentTipPos = bladeTip.position;
-   Vector3 tipVelocity = (currentTipPos - lastTipPos) / Time.fixedDeltaTime;
-   lastTipPos = currentTipPos;
-   ```
-2. **Sweep-test** between last frame's and this frame's tip position instead of relying on overlap:
-   ```csharp
-   if (Physics.Linecast(lastTipPos, currentTipPos, out RaycastHit hit, enemyLayerMask))
-   {
-       if (tipVelocity.magnitude > minHitVelocity)
-           RegisterHit(hit, tipVelocity);
-   }
-   ```
-   For a wide blade, sweep multiple points (tip/mid/base) or use `Physics.SphereCast` along the blade length.
-3. **Velocity threshold gate** (`minHitVelocity`) so resting the blade against an enemy doesn't count as a hit. This also scales damage naturally by swing speed.
-4. **Debounce per swing** — once a swing registers a hit against a given enemy, ignore further hits from that swing until velocity drops below threshold and rises again (prevents multi-hit from one motion).
+1. **Blade tip velocity tracked every `FixedUpdate`** (tip transform, not hilt/grip).
+2. **`Physics.Linecast`** between last and current tip position, filtered by `enemyLayerMask`.
+3. **Velocity threshold gate** (`minHitVelocity`, default 1.5) — hit only registers if tip speed exceeds this.
+4. **Debounce via `lastHitCollider`** — once a swing hits a given collider, that same collider is ignored until tip velocity drops back below threshold (swing ends) and rises again. This is a clean, minimal implementation of the "don't multi-hit in one swing" requirement.
 
-### Weapon tracking: kinematic vs. physics-driven
+```csharp
+void FixedUpdate()
+{
+    var currentTipPos = bladeTip.position;
+    var tipVelocity = (currentTipPos - lastTipPos) / Time.fixedDeltaTime;
 
-- **Kinematic/tracked (chosen starting approach):** weapon transform directly follows the controller (XRI default `XR Grab Interactable`). Predictable, 1:1 responsive, easy to reason about. Can visually clip through geometry.
-- **Physics-driven (rigidbody chasing target via `MovePosition`/PD controller):** feels weightier, can't clip through walls, but harder to tune (floaty/laggy if spring/damping is off) and costs more dev time. Revisit later only if needed.
-- **XRI gotcha:** default `XR Grab Interactable` has attach-point smoothing/interpolation for comfort — this lags the weapon slightly behind the controller. **Disable/minimize this for melee weapons** (laggy sword tracking feels bad); fine to leave on for slower two-handed props.
+    if (tipVelocity.magnitude > minHitVelocity &&
+        Physics.Linecast(lastTipPos, currentTipPos, out var hit, enemyLayerMask))
+    {
+        if (hit.collider != lastHitCollider)
+        {
+            RegisterHit(hit, tipVelocity);
+            lastHitCollider = hit.collider;
+        }
+    }
+    else if (tipVelocity.magnitude <= minHitVelocity)
+    {
+        lastHitCollider = null;
+    }
 
-### Haptics
+    lastTipPos = currentTipPos;
+}
+```
 
-Fire a short (~20-40ms) controller haptic pulse on confirmed hit, amplitude scaled by hit velocity (`SendHapticImpulse`). Disproportionately important for perceived "weight" since there's no real inertia felt through the controller otherwise.
+**Not yet implemented / open items:**
+- Damage amount is a flat `baseDamage` (10) rather than velocity-scaled — original plan was to scale damage with swing speed via a `VelocityToDamage` curve. Currently only the *hit registration* is velocity-gated, not the damage amount.
+- `hitZone` is hardcoded to `HitZone.Torso` — head/limb colliders aren't distinguished yet.
+- Multi-point sweep (tip/mid/base) for wide blades not implemented — single point (`bladeTip`) only. Fine for a thin sword, worth revisiting if the weapon shape changes.
+- Weapon tracking: uses **kinematic/tracked** movement as planned (no physics-driven rigidbody chase). XRI attach-point smoothing hasn't been explicitly addressed yet — worth checking whether it's introducing lag on the real grabbed sword object.
+- **Haptics** on hit — not yet wired in (`SendHapticImpulse` call is still TODO).
 
-### Build order
+### Build order (as planned, followed correctly)
 
-1. Build swing + hit detection against a static test dummy first — tune hitstop timing, haptic strength, responsiveness in isolation.
-2. Add a simple enemy with hit reactions once swing feel is solid.
-3. Add blocking/parry only after base combat feels good.
+1. ✅ Swing + hit detection against a static test dummy (`TestDummy.cs`) — done.
+2. ✅ Basic enemy with hit reactions — done (`EnemyController`, Light/Heavy tiers only).
+3. ⬜ Blocking/parry — not started.
 
 ---
 
-## 2. Parry / Block
+## 2. Parry / Block — ⬜ Not yet implemented
 
-VR allows **real physical blocking** — the player's weapon/shield physically intercepts the incoming attack. Build this as the base layer, with timed **parry** as a bonus layer on top.
+Planned design (unchanged from original brainstorm, nothing built yet):
 
-### Physical block detection
+VR allows **real physical blocking** — the player's weapon/shield physically intercepts the incoming attack. Build this as the base layer, with timed **parry** as a bonus layer.
 
-Give enemy weapons the same tip-tracking as the player's sword. Check weapon-vs-weapon collision **before** weapon-vs-player-body:
+### Physical block detection (planned)
+
+Enemy weapons would need the same tip-tracking as the player's sword. Check weapon-vs-weapon collision **before** weapon-vs-player-body:
 
 ```csharp
 if (Physics.Linecast(lastTipPos, currentTipPos, out RaycastHit blockHit, playerWeaponLayerMask))
@@ -68,72 +80,60 @@ if (Physics.Linecast(lastTipPos, currentTipPos, out RaycastHit playerHit, player
 }
 ```
 
-### Block → Parry
-
-Parry = a block landed within a tight timing window relative to the enemy's **attack-active** phase (not windup):
+### Block → Parry (planned)
 
 ```csharp
 float timeSinceAttackActive = Time.time - enemyAttackActiveTimestamp;
 bool isParry = timeSinceAttackActive <= parryWindowSeconds; // e.g. 0.25s
 
-if (isParry)
-    TriggerParry(enemy);   // hard stagger, counter window, strong haptic + hitstop
-else
-    TriggerBlock(enemy);   // chip damage/stamina cost, softer stagger
+if (isParry) TriggerParry(enemy);   // hard stagger, counter window, strong haptic + hitstop
+else TriggerBlock(enemy);           // chip damage/stamina cost, softer stagger
 ```
 
-Same physical action (weapon in the way) from the player's perspective — the game decides block vs. parry from timing. Important for VR fairness: no separate input to learn.
+**Prerequisite not yet in place:** enemies don't currently deal damage to the player at all (see §3), so there's nothing to block/parry yet — building enemy-attacks-player is a prerequisite for this system, not parallel work.
 
-### Telegraphing (non-negotiable for VR fairness)
+### Telegraphing (non-negotiable for VR fairness — design note, unaffected by current status)
 
-Real human reaction time is required for physical blocking, so enemy attacks need clearly readable tells:
-- Windup phase noticeably longer than a flatscreen game (~0.4–0.6s minimum before the strike lands, tunable per enemy).
-- Pair visual windup with an audio cue (whoosh building, grunt) — VR players often react to audio faster than peripheral vision.
-- Telegraph **direction** too (wide horizontal pullback vs. overhead raise) so blocking is real spatial reasoning, not "hold shield up constantly."
+- Windup phase noticeably longer than a flatscreen game (~0.4–0.6s minimum) — `EnemyController.windupDuration` field already exists (default 0.5s), so the timing hook is in place even though nothing plays back a visual/audio telegraph yet.
+- Pair visual windup with an audio cue — not yet implemented.
+- Telegraph **direction** — not yet implemented (current `Telegraph` state has no directional data).
 
 ---
 
-## 3. Enemy AI state machine
+## 3. Enemy AI state machine — ✅ Partially implemented (`EnemyController.cs`)
 
-Simple explicit FSM is sufficient for this scope — no behavior tree needed.
+### States implemented
 
 ```
-Dormant → Idle → Approach → Telegraph(Windup) → AttackActive → Recover → (back to Approach)
-                                    ↓ (interrupted by player block/parry)
-                                Blocked / Staggered → Recover
-                                    ↓ (player successfully hits)
-                                HitReact(tier) → Recover or Dead
+Dormant → Idle → Approach → Telegraph → AttackActive → Recover → (back to Approach)
+                                              ↓ (player hits with Heavy tier)
+                                          HitReact → Approach
+                                              ↓ (HP <= 0)
+                                          Dead
 ```
 
-- **`Dormant`**: added state before `Idle`. Enemy exists but AI is fully disabled — no `Update()` cost, not combat-reactive. Default state until an encounter activates it (see §6).
-- **Telegraph → AttackActive** is the only window where a player block/parry counts as parry-timed.
-- **Blocked/Staggered** briefly disables the enemy's own attack input — makes parry feel rewarding (enemy can't immediately retaliate).
-- **Recover** prevents chained attacks with zero downtime; gives the player breathing room and keeps telegraphs readable.
+- `Dormant`: correct default state, `Update()` returns immediately for `Dormant`/`Dead` — matches the "no AI cost while inactive" goal.
+- `Activate()` only transitions out of `Dormant` once — correctly guarded.
+- Debug visualization: `bodyRenderer.material.color` changes per state (nice addition beyond the original plan — makes state easy to verify visually during testing).
+- `HandleApproach()` moves the enemy toward `target` via `MoveTowards`, transitions to `Telegraph` once in `attackRange`.
+- Timed transitions (`Telegraph → AttackActive → Recover → Approach`) work via a `stateTimer` countdown in `Update()`.
 
-### Hit reaction tiers
+### Not yet implemented
 
-Reuse the velocity value already computed for damage — no extra data needed:
+- **`Blocked`/`Staggered` state** — doesn't exist yet; needed once parry/block is built.
+- **`AttackActive` doesn't deal damage to the player.** The state times out and moves to `Recover`, but nothing calls `ApplyDamage` on the player during this window. Confirm whether this is deliberate ("player offense before player defense" milestone sequencing) or an oversight before treating combat as feature-complete.
+- **Hit reaction tiers:** only `Light`/`Heavy` are computed (`info.impactVelocity >= heavyHitVelocityThreshold`). `HitTier.Parried` and `HitTier.Killing` exist in the enum but nothing produces them yet.
+- **Hit-location-based reactions** — `hitZone` isn't factored into reaction tier (ties back to `SwordWeapon` hardcoding `HitZone.Torso`).
 
-| Tier | Trigger | Reaction |
-|---|---|---|
-| Light | low-velocity hit | small flinch, doesn't interrupt current action |
-| Heavy | high-velocity hit | full stagger, interrupts windup/attack |
-| Parried | parry-timed block | hard stagger + brief vulnerable window, strongest hitstop |
-| Killing blow | HP ≤ 0 | ragdoll/death animation, overrides other tiers |
+### Tuning fields already exposed (good — matches the "expose as ScriptableObject/Inspector fields, not constants" guidance)
 
-Hit-location-based reactions (via head/torso/limb colliders) are a good stretch goal once velocity-tiered reactions work.
-
-### Tuning
-
-Expose `minHitVelocity`, `parryWindowSeconds`, windup duration, hitstop duration as **ScriptableObject fields per enemy type** — these get retuned constantly by feel, don't hardcode as constants.
-
-**Playtest block/parry timing on real hardware early** — reaction-time-dependent mechanics are exactly what the XR Device Simulator cannot validate.
+`approachSpeed`, `attackRange`, `windupDuration`, `attackActiveDuration`, `recoverDuration`, `maxHP`, `heavyHitVelocityThreshold` are all serialized fields on `EnemyController`. Note: these currently live directly on the component rather than a per-enemy-type ScriptableObject — fine at one-enemy-type scale, worth revisiting if multiple enemy types are added, so tuning doesn't mean duplicating a prefab per variant.
 
 ---
 
-## 4. Throwables & blow dart — shared damage pipeline
+## 4. Throwables & blow dart — ⬜ Not yet implemented
 
-**Core idea:** melee (sweep-test) and projectiles (collision) detect hits differently, but should feed the **same** downstream damage/reaction system.
+No `RockThrowable` or `BlowDart` scripts exist in the repo yet. Design plan (unchanged):
 
 ```csharp
 public struct DamageInfo
@@ -143,9 +143,34 @@ public struct DamageInfo
     public Vector3 hitDirection;
     public float impactVelocity;
     public DamageSourceType sourceType; // Melee, Thrown, Dart
-    public HitZone hitZone;             // Head, Torso, Limb
+    public HitZone hitZone;
     public GameObject instigator;
     public StatusEffectData appliedEffect; // null for sword/rock, set for status darts
+}
+```
+This struct **is already implemented** exactly as planned (see §5) — so adding rock/dart weapon scripts is now just a matter of building the detection front-end (`OnCollisionEnter` for a thrown rigidbody) and constructing this same struct, per the original plan. This is a good next milestone: it's the best test of whether the existing `DamageInfo`/`IDamageable` abstraction holds up against a second, differently-shaped weapon.
+
+- Rocks: standard `Rigidbody`, XRI grab + release-velocity throw, `OnCollisionEnter` → build `DamageInfo` → `ApplyDamage`.
+- Blow dart: same projectile shape, different launch trigger. Start with simple button-launch; mic-amplitude "real blow" input remains a stretch goal, decoupled from the damage pipeline.
+
+---
+
+## 5. Shared damage pipeline — ✅ Implemented (`DamageInfo.cs`)
+
+```csharp
+public enum DamageSourceType { Melee, Thrown, Dart }
+public enum HitZone { Head, Torso, Limb }
+
+public struct DamageInfo
+{
+    public float amount;
+    public Vector3 hitPoint;
+    public Vector3 hitDirection;
+    public float impactVelocity;
+    public DamageSourceType sourceType;
+    public HitZone hitZone;
+    public GameObject instigator;
+    public StatusEffectData appliedEffect;
 }
 
 public interface IDamageable
@@ -154,152 +179,76 @@ public interface IDamageable
 }
 ```
 
-Every weapon type just builds a `DamageInfo` and calls `ApplyDamage` — hit reaction tiers, hitstop, haptics, VFX all read from this struct regardless of source.
-
-### Rocks (throwable)
-
-- Standard `Rigidbody`, grabbed via XRI, released with velocity from recent hand-motion frames (XRI default throw behavior — tune the velocity smoothing window).
-- On `OnCollisionEnter`, build `DamageInfo` from impact velocity + contact point, call `ApplyDamage`.
-- Reuse a shared `VelocityToDamage(float velocity, DamageCurve curve)` helper — per-weapon `AnimationCurve` (ScriptableObject) so sword/rock/dart can each have distinct velocity→damage tuning without duplicating logic.
-
-### Blow dart
-
-- Structurally a projectile like the rock — only the **launch method** differs (not player-arm velocity).
-- Launch input decoupled from detection/damage: start with simple button-triggered launch (grip + trigger = blow, preset force + slight spread). Mic-amplitude-based "real blow" input is a viable **later swap** since it doesn't touch the damage pipeline at all.
-- Add `StatusEffectData appliedEffect` (nullable) to `DamageInfo` if darts apply poison/sleep/etc., rather than branching dart logic out of the shared struct.
-
-### Enemy-side (unified)
+Implemented **exactly** as planned in the original brainstorm, including the optional `StatusEffectData` field for future dart status effects (`StatusEffectData.cs` already exists as a supporting type). `EnemyController` implements `IDamageable` and correctly guards against double-firing `OnDeath`:
 
 ```csharp
 public void ApplyDamage(DamageInfo info)
 {
-    currentHP -= info.amount;
-    var tier = ResolveHitTier(info.impactVelocity, info.hitZone); // same tiering as melee
-    TriggerHitReaction(tier, info.hitDirection);
-    SendHapticFeedback(info.sourceType); // e.g. darts get a subtler haptic than sword hits
-
-    if (currentHP <= 0 && currentState != State.Dead)
-    {
-        currentState = State.Dead;
-        aiBehaviour.enabled = false;
-        OnDeath?.Invoke(this);
-    }
+    if (currentState == EnemyState.Dead) return; // correct guard
+    ...
 }
 ```
-Note the `currentState != State.Dead` guard — prevents a corpse hit again (e.g. thrown rock) from double-firing `OnDeath` and breaking encounter enemy-count tracking (see §6).
 
-### Where source type SHOULD still branch
-
-- **Hitstop duration/feel** — sword vs. rock vs. dart can want different freeze lengths; keep per-source-type tunable.
-- **VFX/audio** — sparks vs. dust puff vs. sting, triggered from the same `ApplyDamage` call site.
-- **AI aggro** — a ranged hit might alert enemies from range in a way a melee hit (already close) doesn't need to.
-
-### Build order
-
-1. Define `DamageInfo`/`IDamageable` first; retrofit the already-tuned sword damage call through it.
-2. Add the rock — best test of whether the abstraction holds (different detection method, same pipeline).
-3. Add the dart last with placeholder button-launch; treat "blow" input as a swappable front-end for later.
-
-Signal to watch for: if adding the 2nd/3rd weapon type still requires touching enemy/hit-reaction code, the abstraction needs adjustment before adding more content.
+This is the one piece of the plan that's already fully validated against real code — `SwordWeapon` → `DamageInfo` → `EnemyController.ApplyDamage` works end-to-end.
 
 ---
 
-## 5. Enemy spawn & encounter activation system
+## 6. Enemy spawn & encounter activation — ✅ Implemented, simplified (`EncounterManager.cs`)
 
-### Data model
-
-```csharp
-[CreateAssetMenu(menuName = "Combat/EncounterDefinition")]
-public class EncounterDefinition : ScriptableObject
-{
-    public string encounterId;     // "story_a_ch1_combat1"
-    public List<EnemySpawnData> spawns;
-    public bool lockAreaUntilCleared;
-}
-
-[Serializable]
-public class EnemySpawnData
-{
-    public GameObject enemyPrefab;
-    public Vector3 localPosition;
-    public Quaternion localRotation;
-}
-```
-
-### Encounter manager (bridges area trigger → enemy activation → quest flag)
+The implemented version is a reasonable simplification of the original design: instead of an `EncounterDefinition` ScriptableObject + prefab spawn-position data, enemies are **hand-placed in the scene and assigned directly** via a `List<EnemyController>` on `EncounterManager`. This is a sensible reduction in complexity for a first vertical slice — the original ScriptableObject-driven version is worth revisiting once encounters need to be reused/randomized across chapters, but isn't needed yet.
 
 ```csharp
 public class EncounterManager : MonoBehaviour
 {
-    public EncounterDefinition definition;
-    private List<EnemyController> spawnedEnemies = new();
-    private int aliveCount;
-    private bool encounterStarted;
+    [SerializeField] string encounterId;
+    [SerializeField] List<EnemyController> enemies;
 
-    // Called by AreaTrigger.onPlayerEnter
+    int aliveCount;
+    bool started;
+
     public void BeginEncounter()
     {
-        if (encounterStarted) return;
-        encounterStarted = true;
-
-        foreach (var enemy in spawnedEnemies)
+        if (started) return;
+        started = true;
+        aliveCount = enemies.Count;
+        foreach (var enemy in enemies)
         {
             enemy.OnDeath += HandleEnemyDeath;
             enemy.Activate();
         }
-        aliveCount = spawnedEnemies.Count;
-
-        if (definition.lockAreaUntilCleared)
-            areaBoundary.SetLocked(true);
     }
 
-    private void HandleEnemyDeath(EnemyController enemy)
+    void HandleEnemyDeath(EnemyController enemy)
     {
         enemy.OnDeath -= HandleEnemyDeath;
         aliveCount--;
         if (aliveCount <= 0) CompleteEncounter();
     }
 
-    private void CompleteEncounter()
-    {
-        if (definition.lockAreaUntilCleared)
-            areaBoundary.SetLocked(false);
-        QuestManager.SetFlag($"{definition.encounterId}_cleared");
-    }
+    void CompleteEncounter() => QuestManager.SetFlag($"{encounterId}_cleared");
 }
 ```
 
-Wired directly into the level's `AreaTrigger.onPlayerEnter` (see `02-game-architecture.md`).
+Correctly wires into `QuestManager.SetFlag` — same completion currency as puzzles and dialogue, as planned.
 
-### Pre-placed-dormant vs. runtime-instantiated
+**Two activation paths currently coexist in the repo:**
+- `EncounterManager.BeginEncounter()` — the "real" system, intended to be called from an `AreaTrigger.onPlayerEnter`.
+- `TestDummy.cs` — a lighter-weight manual test harness that calls `enemy.Activate()` directly on trigger enter for a single enemy, then destroys itself. Useful for isolated melee-feel testing (matches the "test against a static dummy first" build-order guidance), but separate from the real encounter-clearing flow. Worth being deliberate about which one any given test scene is using, so `_cleared` flags aren't missed.
 
-- **Pre-placed in scene, `Dormant`, renderers optionally disabled (chosen default):** cheaper at runtime, no instantiation hitch, precise hand-placement in editor.
-- **Runtime `Instantiate()` from spawn data:** more flexible/reusable/randomizable, but risks a frame hitch right as combat starts — bad timing for VR (reads as a technical glitch, not tension). Only use if reuse/randomization is actually needed later.
-
-### The "reveal" moment matters in VR
-
-Don't `SetActive(true)` an enemy from nothing right in front of the player — reads as glitchy. Prefer enemies already visually present but idle (sleeping/back turned) transitioning to alert, or a diegetic cue (growl, step out from cover already in the scene) before appearing.
-
-### Locking the arena
-
-Opt-in per encounter (`lockAreaUntilCleared`), not a blanket rule — not every encounter needs to trap the player. When locked, prefer a **diegetic barrier** (gate closing, roots growing across the path, a ward flickering in) over a plain invisible wall — also a good hook for the folklore/spirit theming.
-
-### Don't `Destroy()` dead enemies immediately
-
-- Keeps checkpoint re-entry simple: re-apply `Dead` state to existing objects instead of re-instantiating and re-killing.
-- Lets ragdoll/death animation settle naturally; fade/despawn after a delay only if needed for object-count/performance reasons.
-
-### Checkpoint integration
-
-On chapter load, `EncounterManager` checks `QuestManager` flags first — if `{encounterId}_cleared` is already true, **skip activation entirely**, set all enemies straight to `Dead`/disabled/hidden rather than replaying the encounter.
+**Not yet implemented (carried over from the original design, still relevant):**
+- **Pre-placed-dormant vs. runtime-instantiated:** pre-placed is what's implemented (enemies exist in-scene, `Dormant` by default) — matches the recommended default.
+- **The "reveal" moment** (avoid instant pop-in) — not addressed yet; enemies currently just switch state, no transition/reveal treatment.
+- **Arena locking (`lockAreaUntilCleared`)** — not present in the current `EncounterManager`; no diegetic-barrier or invisible-wall locking exists yet. Fine to add later, opt-in per encounter as originally planned.
+- **Checkpoint-aware re-entry** (skip already-cleared encounters, force enemies straight to `Dead` on scene load) — **not implemented**. This is the same underlying gap flagged in `02-game-architecture.md` (checkpoint respawn doesn't re-apply quest-flag state to the scene) — fixing that generally will fix this specifically too.
+- **Don't-destroy-dead-enemies guidance** — currently moot since there's no despawn/destroy call at all yet; worth confirming intentionally once death animations exist.
 
 ### Decided: death/respawn behavior
 
-**If the player dies mid-encounter, the encounter fully resets** (all enemies back to full HP) on respawn at the checkpoint — chosen over partial persistence for simplicity and because it matches convention in most combat-focused games.
+**If the player dies mid-encounter, the encounter should fully reset** (all enemies back to full HP) on respawn at the checkpoint — decided, but **not yet wired up**, since there's currently no player-death trigger at all (ties back to §3's "enemies don't damage the player yet" gap) and no checkpoint-state-reapplication logic (ties back to the `CheckpointManager` gap in `02-game-architecture.md`).
 
-### Build order
+### Updated build order (given current state)
 
-1. One enemy through `Dormant → Activate() → Idle → ... → Dead`, triggered by a basic `AreaTrigger`, no `EncounterManager` yet.
-2. Add `EncounterManager` with a single-enemy encounter; confirm `OnDeath` → quest flag firing.
-3. Scale to multiple enemies; confirm alive-count tracking waits for all of them.
-4. Add checkpoint-aware re-entry (skip already-cleared encounters) last.
+1. ✅ One enemy through `Dormant → Activate() → ... → Dead`, triggered by a basic trigger — done via `TestDummy`.
+2. ✅ `EncounterManager` with single/multi-enemy encounters, `OnDeath` → quest flag firing — done.
+3. ⬜ Player-facing enemy attacks (prerequisite for parry/block and for meaningful "death" to exist at all).
+4. ⬜ Checkpoint-aware re-entry (skip already-cleared encounters) — blocked on the general checkpoint-flag-reapplication fix.
