@@ -2,11 +2,18 @@ using UnityEngine;
 
 namespace VRGame.Combat
 {
-    public class TestDummy : MonoBehaviour, IDamageable
+    public class TestDummy : MonoBehaviour
     {
-        public void ApplyDamage(DamageInfo info)
+        public EnemyController enemy;
+
+        void OnTriggerEnter(Collider other)
         {
-            Debug.Log($"[TestDummy] Hit for {info.amount} dmg | vel: {info.impactVelocity:F2} | source: {info.sourceType} | zone: {info.hitZone}", this);
+            if (other.CompareTag("Player"))
+            {
+                enemy.Activate();
+
+                Destroy(this);
+            }
         }
     }
 }
