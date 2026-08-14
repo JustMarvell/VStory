@@ -16,3 +16,9 @@ MonoBehaviour:
   storyId: story_a
   checkpointSpawnPos: {x: -1.169, y: 0, z: 0.8410001}
   checkpointSpawnRot: {x: 0, y: 0.86602545, z: 0, w: 0.49999997}
+  sceneRef:
+    m_AssetGUID: 7bfe8905e739af89d86bf0ad8624c514
+    m_SubObjectName: 
+    m_SubObjectType: 
+    m_SubObjectGUID: 
+    m_EditorAssetChanged: 0

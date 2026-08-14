@@ -9,5 +9,6 @@ namespace VRGame.Core
         public string storyId;
         public Vector3 checkpointSpawnPos;
         public Quaternion checkpointSpawnRot;
+        public UnityEngine.AddressableAssets.AssetReference sceneRef;
     }
 }
