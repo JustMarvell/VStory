@@ -1,7 +1,6 @@
 using UnityEngine;
 using UnityEngine.XR.Interaction.Toolkit;
-using UnityEngine.XR.Interaction.Toolkit.Interactables;
-
+using VRGame.Core;
 namespace VRGame.Puzzle
 {
     public class WardSocket : MonoBehaviour
@@ -23,6 +22,12 @@ namespace VRGame.Puzzle
 
             isFilled = true;
             PuzzleManager.Current.ReportSubStepComplete(puzzleId, requiredDollId);
+        }
+
+        public void RestoreIfSolved()
+        {
+            if (!QuestManager.IsFlagSet($"{puzzleId}_solved")) return;
+            isFilled = true;
         }
     }
 }

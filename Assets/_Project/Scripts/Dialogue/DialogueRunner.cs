@@ -15,6 +15,7 @@ namespace VRGame.Dialogue
 
         public void StartDialogue(DialogueSequence sequence)
         {
+            if (!string.IsNullOrEmpty(sequence.setFlagOnComplete) && QuestManager.IsFlagSet(sequence.setFlagOnComplete)) return;
             current = sequence;
             lineIndex = 0;
             panelRoot.SetActive(true);

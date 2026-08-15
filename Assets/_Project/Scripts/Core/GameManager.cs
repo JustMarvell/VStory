@@ -34,6 +34,7 @@ namespace VRGame.Core
             {
                 var checkpointManager = FindFirstObjectByType<CheckpointManager>();
                 checkpointManager?.RespawnAtCheckpoint(chapter);
+                SceneStateRestorer.ApplyQuestFlagsToScene();
             });
         }
 

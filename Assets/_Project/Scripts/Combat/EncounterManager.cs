@@ -36,5 +36,12 @@ namespace VRGame.Combat
         {
             QuestManager.SetFlag($"{encounterId}_cleared");
         }
+
+        public void RestoreIfCleared()
+        {
+            if (!QuestManager.IsFlagSet($"{encounterId}_cleared")) return;
+            started = true;
+            foreach (var enemy in enemies) enemy.ForceDead();
+        }
     }
 }

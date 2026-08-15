@@ -771,7 +771,7 @@ Mesh:
     topology: 0
     baseVertex: 0
     firstVertex: 0
-    vertexCount: 16
+    vertexCount: 9
     localAABB:
       m_Center: {x: 0, y: 0, z: 0}
       m_Extent: {x: 20, y: 0, z: 20}
@@ -791,10 +791,10 @@ Mesh:
   m_KeepVertices: 1
   m_KeepIndices: 1
   m_IndexFormat: 0
-  m_IndexBuffer: 000001000200010003000200040005000600050007000600080009000a0009000b000a000c000d000e000d000f000e00
+  m_IndexBuffer: 000001000200010003000200010004000300040005000300020003000600030007000600030005000700050008000700
   m_VertexData:
     serializedVersion: 3
-    m_VertexCount: 16
+    m_VertexCount: 9
     m_Channels:
     - stream: 0
       offset: 0
@@ -814,6 +814,10 @@ Mesh:
       dimension: 0
     - stream: 0
       offset: 40
+      format: 0
+      dimension: 2
+    - stream: 0
+      offset: 48
       format: 0
       dimension: 2
     - stream: 0
@@ -848,12 +852,8 @@ Mesh:
       offset: 0
       format: 0
       dimension: 0
-    - stream: 0
-      offset: 0
-      format: 0
-      dimension: 0
-    m_DataSize: 768
-    _typelessdata: 0000a0c1000000000000a0c1000000000000803f000000000000803f0000000000000000000080bf0000a0c10000a0c10000a0c10000000000000000000000000000803f000000000000803f0000000000000000000080bf0000a0c10000000000000000000000000000a0c1000000000000803f000000000000803f0000000000000000000080bf000000000000a0c1000000000000000000000000000000000000803f000000000000803f0000000000000000000080bf00000000000000000000a0c10000000000000000000000000000803f000000000000803f0000000000000000000080bf0000a0c1000000000000a0c1000000000000a041000000000000803f000000000000803f0000000000000000000080bf0000a0c10000a041000000000000000000000000000000000000803f000000000000803f0000000000000000000080bf000000000000000000000000000000000000a041000000000000803f000000000000803f0000000000000000000080bf000000000000a04100000000000000000000a0c1000000000000803f000000000000803f0000000000000000000080bf000000000000a0c1000000000000000000000000000000000000803f000000000000803f0000000000000000000080bf00000000000000000000a041000000000000a0c1000000000000803f000000000000803f0000000000000000000080bf0000a0410000a0c10000a0410000000000000000000000000000803f000000000000803f0000000000000000000080bf0000a04100000000000000000000000000000000000000000000803f000000000000803f0000000000000000000080bf000000000000000000000000000000000000a041000000000000803f000000000000803f0000000000000000000080bf000000000000a0410000a0410000000000000000000000000000803f000000000000803f0000000000000000000080bf0000a041000000000000a041000000000000a041000000000000803f000000000000803f0000000000000000000080bf0000a0410000a041
+    m_DataSize: 504
+    _typelessdata: 0000a0c1000000000000a0c1000000000000803f000000000000803f0000000000000000000080bf0000a0c10000a0c117d7a33c0bd7a33c0000a0c10000000000000000000000000000803f000000000000803f0000000000000000000080bf0000a0c1000000006a32003f0bd7a33c00000000000000000000a0c1000000000000803f000000000000803f0000000000000000000080bf000000000000a0c111d7a33c5c32003f000000000000000000000000000000000000803f000000000000803f0000000000000000000080bf00000000000000006a32003f5c32003f0000a0c1000000000000a041000000000000803f000000000000803f0000000000000000000080bf0000a0c10000a0411b467b3f0bd7a33c00000000000000000000a041000000000000803f000000000000803f0000000000000000000080bf000000000000a0411b467b3f5c32003f0000a041000000000000a0c1000000000000803f000000000000803f0000000000000000000080bf0000a0410000a0c10bd7a33c01467b3f0000a0410000000000000000000000000000803f000000000000803f0000000000000000000080bf0000a041000000006a32003f01467b3f0000a041000000000000a041000000000000803f000000000000803f0000000000000000000080bf0000a0410000a0411b467b3f01467b3f
   m_CompressedMesh:
     m_Vertices:
       m_NumItems: 0
@@ -914,7 +914,7 @@ Mesh:
   m_BakedConvexCollisionMesh: 
   m_BakedTriangleCollisionMesh: 
   'm_MeshMetrics[0]': 1
-  'm_MeshMetrics[1]': 1
+  'm_MeshMetrics[1]': 1730.563
   m_MeshOptimizationFlags: 1
   m_StreamData:
     serializedVersion: 2
@@ -934,6 +934,70 @@ Mesh:
       - serializedVersion: 1
         m_IndexStart: 0
         m_IndexCount: 0
+--- !u!1 &351557108
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 351557110}
+  - component: {fileID: 351557109}
+  m_Layer: 0
+  m_Name: NavMesh
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &351557109
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 351557108}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7a5ac11cc976e418e8d13136b07e1f52, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Unity.AI.Navigation::Unity.AI.Navigation.NavMeshSurface
+  m_SerializedVersion: 0
+  m_AgentTypeID: 0
+  m_CollectObjects: 0
+  m_Size: {x: 10, y: 10, z: 10}
+  m_Center: {x: 0, y: 2, z: 0}
+  m_LayerMask:
+    serializedVersion: 2
+    m_Bits: 4294967295
+  m_UseGeometry: 0
+  m_DefaultArea: 0
+  m_GenerateLinks: 0
+  m_IgnoreNavMeshAgent: 1
+  m_IgnoreNavMeshObstacle: 1
+  m_OverrideTileSize: 0
+  m_TileSize: 256
+  m_OverrideVoxelSize: 0
+  m_VoxelSize: 0.16666667
+  m_MinRegionArea: 2
+  m_NavMeshData: {fileID: 23800000, guid: 13f9a4351dff1ab2d9310b94567c2559, type: 2}
+  m_BuildHeightMesh: 0
+--- !u!4 &351557110
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 351557108}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &414377188
 GameObject:
   m_ObjectHideFlags: 0
@@ -1949,7 +2013,7 @@ GameObject:
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
+  m_StaticEditorFlags: 2147483647
   m_IsActive: 1
 --- !u!64 &1114369387
 MeshCollider:
@@ -3759,6 +3823,7 @@ GameObject:
   - component: {fileID: 2027570845}
   - component: {fileID: 2027570844}
   - component: {fileID: 2027570848}
+  - component: {fileID: 2027570849}
   m_Layer: 6
   m_Name: TestEnemy
   m_TagString: Untagged
@@ -3882,6 +3947,28 @@ MonoBehaviour:
   recoverDuration: 0.8
   maxHP: 30
   heavyHitVelocityThreshold: 4
+--- !u!195 &2027570849
+NavMeshAgent:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2027570842}
+  m_Enabled: 1
+  m_AgentTypeID: 0
+  m_Radius: 0.5
+  m_Speed: 3.5
+  m_Acceleration: 8
+  avoidancePriority: 50
+  m_AngularSpeed: 120
+  m_StoppingDistance: 0
+  m_AutoTraverseOffMeshLink: 1
+  m_AutoBraking: 1
+  m_AutoRepath: 1
+  m_Height: 2
+  m_BaseOffset: 1
+  m_WalkableMask: 4294967295
+  m_ObstacleAvoidanceType: 4
 --- !u!1 &2046553883
 GameObject:
   m_ObjectHideFlags: 0
@@ -4416,3 +4503,4 @@ SceneRoots:
   - {fileID: 142449518}
   - {fileID: 2067866437}
   - {fileID: 1051068705}
+  - {fileID: 351557110}

@@ -1,10 +1,12 @@
 using UnityEngine;
+using UnityEngine.AI;
 
 namespace VRGame.Combat
 {
     public enum EnemyState { Dormant, Idle, Approach, Telegraph, AttackActive, Recover, HitReact, Dead }
     public enum HitTier { Light, Heavy, Parried, Killing }
 
+    [RequireComponent(typeof(NavMeshAgent))]
     public class EnemyController : MonoBehaviour, IDamageable
     {
         [Header("References")]
@@ -27,15 +29,24 @@ namespace VRGame.Combat
         public event System.Action<EnemyController> OnDeath;
 
         EnemyState currentState = EnemyState.Dormant;
+        NavMeshAgent agent;
         float stateTimer;
         float currentHP;
+
+        public void ForceDead() => SetState(EnemyState.Dead);
 
         static readonly Color[] StateColors =
         {
             Color.gray, Color.white, Color.cyan, Color.yellow, Color.red, Color.blue, Color.magenta, Color.black
         };
 
-        void Awake() => currentHP = maxHP;
+        void Awake()
+        {
+            currentHP = maxHP;
+            agent = GetComponent<NavMeshAgent>();
+            agent.speed = approachSpeed;
+            agent.stoppingDistance = attackRange * 0.9f;
+        }
 
         public void Activate()
         {
@@ -77,12 +88,14 @@ namespace VRGame.Combat
 
             if (distance <= attackRange)
             {
+                agent.isStopped = true;
                 SetState(EnemyState.Telegraph);
                 return;
             }
 
             if (currentState != EnemyState.Approach) SetState(EnemyState.Approach);
-            transform.position = Vector3.MoveTowards(transform.position, target.position, approachSpeed * Time.deltaTime);
+            agent.isStopped = false;
+            agent.SetDestination(target.position);
         }
 
         public void ApplyDamage(DamageInfo info)
@@ -108,6 +121,10 @@ namespace VRGame.Combat
         void SetState(EnemyState newState)
         {
             currentState = newState;
+
+            if (newState != EnemyState.Idle && newState != EnemyState.Approach)
+                agent.isStopped = true;
+
             stateTimer = newState switch
             {
                 EnemyState.Telegraph => windupDuration,
