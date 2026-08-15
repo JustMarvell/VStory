@@ -13,6 +13,9 @@ namespace VRGame.Core
         [SerializeField] AssetReference mainMenuScene;
         [SerializeField] AssetReference levelSelectScene;
 
+        [SerializeField] AssetReference testLevelScene;
+        public void LoadTestLevel() => LoadSceneAdditive(testLevelScene);
+
         AsyncOperationHandle<SceneInstance> currentHandle;
         bool hasLoadedScene;
 

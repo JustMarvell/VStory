@@ -24,6 +24,7 @@ namespace VRGame.Core
             if (IsFlagSet(flagId)) return;
             SaveManager.Current.questFlags[flagId] = true;
             OnQuestFlagSet?.Invoke(flagId);
+            Debug.Log("Flag Is Set : " + flagId);
             SaveManager.SaveToDisk();
         }
 
