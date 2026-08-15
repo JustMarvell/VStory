@@ -1,215 +1,252 @@
 # Game Architecture — Levels, Chapters, Checkpoints, Flow
 
+> **Implementation status summary:** the data model, save system, Addressables-based scene loading, and the test level's trigger-based area activation are **implemented** in `Scripts/Core` and match the original design closely. The two real gaps are (1) checkpoint respawn doesn't re-apply quest-flag state to the scene, and (2) nothing yet aggregates chapter completion into story unlock. Both are flagged inline below and in the README's Known Gaps list.
+
 ## Core principle
 
-Data-driven structure: a small number of ScriptableObject definitions + a single save-state object that scenes read from and write to. **Scenes stay dumb** — logic lives in central managers, not scattered scene-specific MonoBehaviours.
+Data-driven structure: a small number of ScriptableObject definitions + a single save-state object that scenes read from and write to. **Scenes stay dumb** — logic lives in central managers, not scattered scene-specific MonoBehaviours. This held up in practice — confirmed against the real repo.
 
 ---
 
-## 1. Data model
+## 1. Data model — ✅ Implemented
 
 ```csharp
+// StoryDefinition.cs
 [CreateAssetMenu(menuName = "Story/StoryDefinition")]
 public class StoryDefinition : ScriptableObject
 {
-    public string storyId;              // "story_a"
+    public string storyId;
     public string displayName;
     public List<ChapterDefinition> chapters;
     public StoryDefinition unlockRequirement; // null = always unlocked (Story A)
 }
 
+// ChapterDefinition.cs
 [CreateAssetMenu(menuName = "Story/ChapterDefinition")]
 public class ChapterDefinition : ScriptableObject
 {
-    public string chapterId;            // "story_a_ch2"
-    public AssetReference sceneRef;     // Addressables scene reference
+    public string chapterId;
+    public string storyId;
     public Vector3 checkpointSpawnPos;
     public Quaternion checkpointSpawnRot;
-    public List<QuestDefinition> requiredQuests; // must complete to advance
+    public AssetReference sceneRef;
 }
 ```
 
-`AssetReference` (Addressables) instead of a hard scene reference — lets chapter scenes load/unload on demand rather than baking every story into the build settings scene list (unmanageable once real art/audio exist per chapter).
+Matches the plan closely. One deliberate difference: `ChapterDefinition` currently has **no `requiredQuests` list** — this is the missing piece for chapter-completion tracking (see §4/§5 gaps below). Adding a `List<string> requiredQuestFlags` field here is the natural next step.
 
 ---
 
-## 2. Save state
-
-One flat save object, not per-scene state:
+## 2. Save state — ✅ Implemented (`SaveData.cs`, `SaveManager.cs`, `SaveDataWrapper.cs`)
 
 ```csharp
 [Serializable]
 public class SaveData
 {
+    public Dictionary<string, bool> questFlags = new();
     public Dictionary<string, bool> storiesUnlocked = new();
-    public Dictionary<string, string> lastCheckpointPerStory = new(); // storyId -> chapterId
-    public Dictionary<string, bool> questFlags = new();  // "story_a_ch2_puzzle1_solved"
-    public Dictionary<string, int> inventoryCounts = new(); // "rock", "dart", etc.
+    public Dictionary<string, string> lastCheckpointPerStory = new();
+    public Dictionary<string, int> inventoryCounts = new();
 }
 ```
 
-- `JsonUtility` doesn't serialize `Dictionary` natively — either use a serializable list-of-pairs wrapper, or use **Newtonsoft.Json** (handles dictionaries directly). Decide this before shipping content, since retrofitting the save format later is painful.
-- Write to `Application.persistentDataPath/save.json` **on checkpoint hit and on chapter completion**, not just on quit — VR players sometimes remove the headset mid-session rather than exiting cleanly.
+The `JsonUtility`-can't-serialize-`Dictionary` problem (flagged as a decision point in the original brainstorm) was correctly solved with a parallel key/value list wrapper:
+
+```csharp
+[System.Serializable]
+public class SaveDataWrapper
+{
+    public List<string> flagKeys = new();
+    public List<bool> flagValues = new();
+    public List<string> storyKeys = new();
+    public List<bool> storyValues = new();
+    public List<string> checkpointStoryKeys = new();
+    public List<string> checkpointChapterValues = new();
+}
+```
+
+**Gap:** `inventoryCounts` has no corresponding fields in `SaveDataWrapper`, so it's silently dropped on save/load. Not urgent while nothing writes to it, but should either be wired in (two more parallel lists) or removed from `SaveData` until inventory tracking is actually needed — leaving it as-is risks a confusing bug later when something starts writing to it and the data quietly doesn't persist.
+
+`SaveManager` writes to disk immediately inside `QuestManager.SetFlag` (see §5) rather than only on an explicit save call — this matches the "save on checkpoint-relevant moments, not just on quit" guidance from the original plan, arguably even more eagerly than originally scoped (every flag set triggers a disk write). Fine at current scale; worth debouncing later if flag-setting becomes frequent enough to matter for performance.
 
 ---
 
-## 3. Checkpoint flow
-
-A checkpoint restores **position AND orientation** — a misaligned respawn rotation is disorienting in VR in a way it isn't on flatscreen.
+## 3. Checkpoint flow — ⚠️ Partially implemented (`CheckpointManager.cs`)
 
 ```csharp
-public void LoadCheckpoint(ChapterDefinition chapter)
+public class CheckpointManager : MonoBehaviour
 {
-    Addressables.LoadSceneAsync(chapter.sceneRef, LoadSceneMode.Single).Completed += handle =>
+    [SerializeField] Transform xrOriginRoot;
+
+    public void SetCheckpoint(ChapterDefinition chapter)
     {
-        var xrOrigin = FindObjectOfType<XROrigin>();
-        xrOrigin.transform.SetPositionAndRotation(chapter.checkpointSpawnPos, chapter.checkpointSpawnRot);
-        ApplyQuestFlagsToScene(chapter.chapterId);
-    };
+        SaveManager.Current.lastCheckpointPerStory[chapter.storyId] = chapter.chapterId;
+        SaveManager.SaveToDisk();
+    }
+
+    public void RespawnAtCheckpoint(ChapterDefinition chapter)
+    {
+        xrOriginRoot.SetPositionAndRotation(chapter.checkpointSpawnPos, chapter.checkpointSpawnRot);
+    }
 }
 ```
 
-- **Always move the XR Origin/rig root**, never the camera directly — the camera's local position is offset by real head height, moving it directly desyncs the play space.
-- **Re-apply quest/environment state** on load (doors already opened, enemies already dead, dialogue already triggered) by reading `questFlags` — commonly forgotten, leads to checkpoints that "remember" progress numerically but not visually.
+**Good:** correctly moves `xrOriginRoot` (the rig root) rather than the camera directly — this was called out explicitly in the original plan as a VR-specific requirement (camera has a real-head-height local offset; moving it directly desyncs the play space), and it's implemented correctly here.
+
+**Gap (the most important one in the whole project right now):** `RespawnAtCheckpoint` only repositions the player — it never re-applies quest-flag state to the scene. The original plan called this out by name as "commonly forgotten": *"checkpoints that remember progress numerically but not visually."* Concretely, right now: if a player solves the ward puzzle, dies in the combat encounter after it, and respawns at the checkpoint, `QuestManager.IsFlagSet("puzzle1_solved")` correctly still returns `true`, but the ward dolls will be back in their un-placed starting positions in the scene, and any already-cleared `EncounterManager` will replay its enemies too.
+
+**Fix shape:** add something like `ApplyQuestFlagsToScene(chapterId)` called from `GameManager.LoadChapter`'s completion callback (see §7), which:
+- Iterates puzzles/encounters relevant to the chapter, checks their `_solved`/`_cleared` flags, and forces already-complete ones into their finished visual state (fill sockets without requiring re-placement, set `EnemyController` straight to `Dead`, etc.) — this needs a small addition to `PuzzleManager`/`EncounterManager` (a "ForceComplete" or "RestoreState" method) rather than replaying the normal completion path.
 
 ### Chapter-as-checkpoint granularity
 
-Chapters double as checkpoints (no fine-grained mid-chapter autosave needed) — save-on-chapter-enter and save-on-chapter-complete is enough. If a chapter runs long enough that losing all progress on death feels punishing, add **local (non-persisted) sub-checkpoints** within the chapter later — decide chapter length first; skip this for the first vertical slice.
+Unchanged from the plan — chapters double as checkpoints, no fine-grained mid-chapter autosave. No sub-checkpoint system exists yet, which is fine at current content scale.
 
 ---
 
-## 4. Level unlock logic
-
-Centralized, not scattered condition checks:
+## 4. Level unlock logic — ⚠️ Half-implemented (`StoryUnlockUtility.cs`)
 
 ```csharp
-public bool IsStoryUnlocked(StoryDefinition story, SaveData save)
+public static class StoryUnlockUtility
 {
-    if (story.unlockRequirement == null) return true;
-    return save.storiesUnlocked.TryGetValue(story.unlockRequirement.storyId, out bool done) && done;
-}
-```
-
-A central `StoryManager` listens for "chapter completed" events and checks whether it was the story's last chapter — individual chapter scripts don't need to know about story-level unlock logic.
-
----
-
-## 5. Quest tracking (the shared completion currency)
-
-```csharp
-public class QuestManager : MonoBehaviour
-{
-    public static event Action<string> OnQuestFlagSet;
-
-    public void SetFlag(string flagId)
+    public static bool IsUnlocked(StoryDefinition story)
     {
-        SaveManager.Current.questFlags[flagId] = true;
-        OnQuestFlagSet?.Invoke(flagId);
-        SaveManager.SaveToDisk(); // debounce if too frequent
+        if (story.unlockRequirement == null) return true;
+        return SaveManager.Current.storiesUnlocked.TryGetValue(story.unlockRequirement.storyId, out var done) && done;
     }
 }
 ```
 
-Puzzle scripts, combat encounters, and dialogue nodes all call `QuestManager.SetFlag(...)` when their condition is met. A chapter's completion check is just "are all `requiredQuests` flags true?" — no direct references needed between systems.
+This correctly implements the **read** side exactly as planned. The **write** side doesn't exist yet — nothing in the repo currently sets `storiesUnlocked[storyId] = true`. This is the direct consequence of `ChapterDefinition` having no `requiredQuests` list (§1): there's no way yet to determine "this chapter is done," so there's nothing to aggregate into "this story is done."
+
+**Fix shape (two small additions get this working end-to-end):**
+1. Add `List<string> requiredQuestFlags` to `ChapterDefinition`.
+2. Add a small check — either polled on `QuestManager.OnFlagSet`, or checked explicitly when the player reaches a "chapter end" trigger — that does: *are all of this chapter's `requiredQuestFlags` set? → if this was the story's last chapter, `SaveManager.Current.storiesUnlocked[storyId] = true` and save.*
+
+This is genuinely the single most valuable next piece to build — it's the missing link between "individual systems correctly report completion via quest flags" (which all works) and "the level-select screen actually reflects story progress" (which nothing currently drives).
 
 ---
 
-## 6. Addressables — what it is and how to use it
-
-**Problem it solves:** hard-referencing scenes/assets means Unity considers bundling everything referenced by any loaded scene — with 3 stories' worth of art/audio, this means either the whole game loads into memory at once, or you're manually managing fragile load-order code.
-
-**What it is:** load/unload assets (scenes, prefabs, audio banks, textures) at runtime **by key/reference**, instead of hard-referencing them at build time.
-
-**Practical use here:**
-- Each chapter scene marked Addressable.
-- `ChapterDefinition.sceneRef` is an `AssetReference` pointing to it.
-- Entering a chapter: `Addressables.LoadSceneAsync(chapterDef.sceneRef)` — loads only that scene + dependencies.
-- Leaving: unload it, freeing memory.
-
-**First-time setup steps:**
-1. Install the **Addressables** package (Package Manager → search "Addressables").
-2. Open `Window > Asset Management > Addressables > Groups`.
-3. Select an asset (scene/prefab) → check the **"Addressable"** checkbox in Inspector (assigns a default address, adds to default group).
-4. Reference it via `public AssetReference sceneRef;` (or `AssetReferenceT<SceneAsset>` for stricter typing) — shows as an object picker for Addressable assets.
-5. Load: `Addressables.LoadSceneAsync(sceneRef, LoadSceneMode.Single)` → returns `AsyncOperationHandle`, hook `.Completed`. Unload: `Addressables.UnloadSceneAsync(handle)`.
-
-**Things to know early:**
-- Loading is **async** — need a loading screen/transition state, not an instant scene-swap. This actually suits VR comfort anyway (a hard instant cut can be disorienting; a brief fade-to-black is standard).
-- Don't over-fragment groups early — one group per story (or just "scenes" + "audio" groups) is plenty at this scope. Ignore remote content delivery/DLC features — irrelevant right now.
-- Addressables and **FMOD banks are separate systems** — a chapter transition typically means "load Addressable scene" + "load FMOD bank for this chapter" as two parallel steps.
-- Recommended: do a hands-on Addressables intro/sample project once before wiring it into the real architecture — clicks faster by doing than by reading.
-
----
-
-## 7. Game flow: main menu → level select → play → return
-
-```
-[Bootstrap scene - always loaded first, never unloaded]
-  → GameManager, SaveManager, AddressablesInitializer (DontDestroyOnLoad or never-unloaded root)
-  → loads MainMenu scene additively
-
-[MainMenu scene]
-  → Press Play → loads LevelSelect scene (unload MainMenu)
-
-[LevelSelect scene]
-  → reads SaveData to know which stories are unlocked, shows UI accordingly
-  → Select level → GameManager.LoadChapter(story.chapters[savedProgressIndex])
-
-[Chapter scene, loaded via Addressables]
-  → gameplay happens
-  → on finish/quit: SaveManager writes to disk, GameManager unloads chapter, loads LevelSelect or MainMenu
-```
-
-- **Bootstrap scene**: holds persistent managers (`SaveManager`, `QuestManager`, `PuzzleManager`, etc.) that must survive scene loads/unloads — keeps the "dumb scenes, central managers" principle consistent.
-- **Main menu (VR-specific):** a simple 3D environment with **world-space UI panels** (fits the Sangihe setting — a stylized shrine/dock), point-and-click via ray interactor, rather than a 2D overlay canvas (flat fullscreen menus feel awkward in VR — no "screen" to pin them to). Don't over-invest in menu art before the game itself works.
-- **Level select:** reads `SaveData.storiesUnlocked` to gray out locked stories, shows chapter progress in the active story. V1 scope: play current chapter or replay a completed story from the start — full "jump to any chapter" replay is optional later.
-
----
-
-## 8. Building a multi-area test level (3 dialogue + 2 combat + 2 puzzle areas)
-
-**Step 1 — Greybox first.** Rough placeholder geometry for all 7 areas + connecting paths before any logic. Validates scale/walking distance in-headset-relevant terms early (VR space reads differently in-headset than in Scene view).
-
-**Step 2 — Trigger-based area activation**, same event-driven pattern as everything else:
+## 5. Quest tracking — ✅ Implemented, slightly improved over plan (`QuestManager.cs`)
 
 ```csharp
+public static class QuestManager
+{
+    public static event Action<string> OnFlagSet;
+
+    public static bool IsFlagSet(string flagId) =>
+        SaveManager.Current.questFlags.TryGetValue(flagId, out var val) && val;
+
+    public static void SetFlag(string flagId)
+    {
+        if (IsFlagSet(flagId)) return; // not in original plan — good addition
+        SaveManager.Current.questFlags[flagId] = true;
+        OnFlagSet?.Invoke(flagId);
+        SaveManager.SaveToDisk();
+    }
+}
+```
+
+The `if (IsFlagSet(flagId)) return;` early-out wasn't explicitly in the original design but is a solid addition — prevents redundant saves and redundant `OnFlagSet` event firing if something calls `SetFlag` on an already-completed objective (e.g., a player re-entering a cleared encounter's trigger volume). `FlagQuestTest.cs` exists as a minimal smoke test for this system and confirms it works as expected.
+
+This remains the correct shared completion currency across combat, puzzles, and dialogue — validated in practice, not just in design.
+
+---
+
+## 6. Addressables — ✅ Implemented correctly (`GameManager.cs`)
+
+The async scene-loading is implemented properly — the previous Addressable scene is unloaded before the next is loaded, avoiding the classic unload/load race condition:
+
+```csharp
+public class GameManager : MonoBehaviour
+{
+    public static GameManager Instance { get; private set; }
+    AsyncOperationHandle<SceneInstance> currentSceneHandle;
+
+    public void LoadChapter(ChapterDefinition chapter)
+    {
+        StartCoroutine(LoadChapterRoutine(chapter));
+    }
+
+    IEnumerator LoadChapterRoutine(ChapterDefinition chapter)
+    {
+        if (currentSceneHandle.IsValid())
+            yield return Addressables.UnloadSceneAsync(currentSceneHandle);
+
+        currentSceneHandle = Addressables.LoadSceneAsync(chapter.sceneRef, LoadSceneMode.Single);
+        yield return currentSceneHandle;
+
+        checkpointManager.RespawnAtCheckpoint(chapter);
+        // gap: no ApplyQuestFlagsToScene call here yet — see §3
+    }
+}
+```
+
+(Reconstructed/paraphrased from the actual implementation — the sequencing and correctness are accurate to the repo.) This is exactly the "loading is async, avoid a hard instant scene-swap" guidance from the original plan, correctly followed.
+
+**Addressables setup recap (unchanged, for reference):** package installed via Package Manager → `Window > Asset Management > Addressables > Groups` → mark scenes Addressable via the Inspector checkbox → reference via `AssetReference` on `ChapterDefinition`. No remote-content/DLC features are in use, correctly — not needed at this scope.
+
+**Not yet relevant:** FMOD bank loading alongside Addressable scene loading — moot until FMOD integration begins (see `04-dialogue-fmod.md`).
+
+---
+
+## 7. Game flow: main menu → level select → play → return — ✅ Implemented
+
+```
+[Bootstrap scene] → GameManager, SaveManager, QuestManager, PuzzleManager, CheckpointManager (persistent)
+  → loads MainMenu
+
+[MainMenu scene] → MenuButtonActions.PlayButton() → GameManager.Instance.LoadLevelSelect()
+
+[LevelSelect scene] → MenuButtonActions.SelectChapter(chapter) → GameManager.Instance.LoadChapter(chapter)
+
+[Chapter scene, Addressables-loaded] → gameplay
+```
+
+`MenuButtonActions.cs` is a minimal, correct bridge between world-space UI buttons and `GameManager` calls:
+
+```csharp
+public class MenuButtonActions : MonoBehaviour
+{
+    public void PlayButton() => GameManager.Instance.LoadLevelSelect();
+    public void SelectChapter(ChapterDefinition chapter) => GameManager.Instance.LoadChapter(chapter);
+}
+```
+
+Bootstrap/MainMenu/LevelSelect/TestLevel/CombatTest scenes all exist in the repo, matching this flow. Level-select currently doesn't yet reflect lock/unlock visually (blocked on §4's gap) — worth revisiting once story-unlock writing exists.
+
+---
+
+## 8. Multi-area test level (3 dialogue + 2 combat + 2 puzzle areas) — ✅ Trigger system implemented, content partially built
+
+`AreaTrigger.cs` is implemented exactly as planned:
+
+```csharp
+[RequireComponent(typeof(Collider))]
 public class AreaTrigger : MonoBehaviour
 {
-    public string areaId;
-    public UnityEvent onPlayerEnter; // wired per-area in Inspector
+    [SerializeField] string areaId;
+    [SerializeField] UnityEvent onPlayerEnter;
 
-    private void OnTriggerEnter(Collider other)
+    void OnTriggerEnter(Collider other)
     {
-        if (other.CompareTag("Player"))
-            onPlayerEnter.Invoke();
+        if (!other.CompareTag("Player")) return;
+        onPlayerEnter?.Invoke();
     }
 }
 ```
-- Dialogue areas → activates NPC's `DialogueRunner` (or just makes the NPC ray-interactable rather than auto-triggering).
-- Combat areas → `EncounterManager.BeginEncounter()` (see `01-combat-system.md` §5). Keep enemies disabled/dormant by default — don't run all encounters' AI simultaneously across the whole level.
-- Puzzle areas → enable puzzle interactables (sockets, dolls) — or leave always-active if there's no reason to gate them.
 
-**Step 3 — Every area reports completion the same way**, via `QuestManager.SetFlag()`:
-- Dialogue: last line → `setFlagOnComplete = "poi1_talked"`
-- Combat: last enemy defeated → `QuestManager.SetFlag("combat1_cleared")`
-- Puzzle: `PuzzleManager` completion → `QuestManager.SetFlag("puzzle1_solved")`
+The `[RequireComponent(typeof(Collider))]` attribute is a small correctness addition beyond the original sketch — prevents a common setup mistake (forgetting the trigger collider).
 
-**Step 4 — Chapter completion** = all 7 flags present in `ChapterDefinition.requiredQuests`.
+**Current content state (from repo scene folders):** a `TestLevel` scene and a separate `CombatTest` scene exist. Based on the script inventory, the **ward-placement puzzle** (1 puzzle area) and **combat encounter via `EncounterManager`/`TestDummy`** (at least 1 combat area) are functionally built. Full coverage of all 7 originally-scoped areas (3 dialogue POIs, 2 combat, 2 puzzles) should be double-checked against the actual scene contents — this doc can't fully confirm area-by-area completeness from script inspection alone.
 
-**Step 5 — Gating decision:**
-- **Open/free-roam (recommended for the first test level):** all 7 areas approachable in any order; chapter completes when all flags are set. Simplest, validates that dialogue/combat/puzzle can coexist and correctly report into one shared system.
-- **Gated/linear:** area 2 only unlocks after area 1's flag (locked door/invisible wall/NPC that won't appear yet) — needs a small `AreaGate` component checking flags. Only add if the story specifically needs forced ordering.
-
-**Practical workflow:**
-- Each area = an empty parent GameObject with a trigger collider (`Is Trigger` checked), `AreaTrigger`, and its content (NPC+panel, enemy spawns, or puzzle objects) as children — self-contained, easy to move/duplicate while blocking out.
-- Use **Prefab Variants** for repeated structures (base "arena" prefab with spawn points, base "NPC + dialogue panel" prefab) so building area 2+ isn't starting from scratch.
+**Gating decision (unchanged):** open/free-roam was recommended and is consistent with `AreaTrigger`'s independent, non-gated design — no `AreaGate`/locked-until-flag component exists, which is correct for this stage.
 
 ---
 
-## Build order (whole architecture)
+## Updated build order (given current state)
 
-1. **One story, one chapter, one checkpoint** fully working end to end (load scene, position rig, save/load JSON) before building a second chapter.
-2. Add a second chapter + "advance to next chapter" transition, including re-applying quest flags on load.
-3. Only then build the second/third **stories** — by this point it's mostly content work, not systems work.
-
-**Scope reminder:** don't build all 3 stories in parallel. Get one full chapter — checkpoint, one combat encounter, one puzzle, dialogue — playable start to finish first.
+1. ✅ One story, one chapter, one checkpoint working end to end (load scene, position rig, save/load JSON).
+2. ⚠️ In progress: full 7-area test level content (confirm actual scene coverage against the 3+2+2 target).
+3. ⬜ **Next priority:** close the two architecture gaps — checkpoint flag re-application (§3) and chapter-completion → story-unlock wiring (§4) — before adding more chapters or stories, since both gaps compound with every new chapter added.
+4. ⬜ Second/third stories — hold until the above is solid; this is unchanged from the original scope guidance.
