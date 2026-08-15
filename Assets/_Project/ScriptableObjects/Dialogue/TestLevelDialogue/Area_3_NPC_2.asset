@@ -1,0 +1,22 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9d84c0eb1ce6966e19545afb8576913c, type: 3}
+  m_Name: Area_3_NPC_2
+  m_EditorClassIdentifier: Assembly-CSharp::VRGame.Dialogue.DialogueSequence
+  sequenceId: area_3_npc_2
+  lines:
+  - speakerName: NPC 2
+    text: 'I''m Also an NPC!
+
+      Sometimes i also can give you hints, clues, or
+      insight about puzzle that you might find in your adventure'
+  setFlagOnComplete: dialogue_area_3_NPC_2_talked
