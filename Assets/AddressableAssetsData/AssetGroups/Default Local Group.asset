@@ -15,6 +15,11 @@ MonoBehaviour:
   m_GroupName: Default Local Group
   m_GUID: b798336d9dfa8b914a17bf8335760bda
   m_SerializeEntries:
+  - m_GUID: 1c4fc77c1bd80fe69ac31df066463593
+    m_Address: Assets/_Project/Scenes/Level_1/Chapter_1_HollowBetween.unity
+    m_ReadOnly: 0
+    m_SerializedLabels: []
+    FlaggedDuringContentUpdateRestriction: 0
   - m_GUID: 328c1dc2c2dbe8ccc81eacec658c7a17
     m_Address: Assets/_Project/Scenes/MainMenu.unity
     m_ReadOnly: 0
